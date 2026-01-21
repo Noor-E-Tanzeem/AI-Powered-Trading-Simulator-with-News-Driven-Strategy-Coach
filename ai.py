@@ -9,7 +9,7 @@ import time
 
 @st.cache_data(ttl=3600)
 def fetch_stock_data(symbol):
-    max_attempts = 5
+    max_attempts = 3
     for _ in range(max_attempts):
         try:
             stock = yf.Ticker(symbol)
@@ -17,23 +17,28 @@ def fetch_stock_data(symbol):
             if data.empty:
                 return None
             return data
-        except:
+        except Exception:
             time.sleep(5)
     return None
 
 
-def simple_sentiment(text):
-    positive_words = ["gain", "growth", "profit", "high", "up", "strong", "optimistic"]
-    negative_words = ["loss", "drop", "decline", "risk", "down", "weak", "regulatory"]
+def simple_sentiment(news):
+    positive_words = ["growth", "profit", "gain", "high", "strong", "optimistic"]
+    negative_words = ["loss", "decline", "drop", "risk", "regulatory", "weak"]
 
-    text = text.lower()
+    score = 0
+    text = news.lower()
 
-    pos = sum(word in text for word in positive_words)
-    neg = sum(word in text for word in negative_words)
+    for word in positive_words:
+        if word in text:
+            score += 1
+    for word in negative_words:
+        if word in text:
+            score -= 1
 
-    if pos > neg:
+    if score > 0:
         return "Positive"
-    elif neg > pos:
+    elif score < 0:
         return "Negative"
     else:
         return "Neutral"
@@ -45,8 +50,8 @@ def simple_sentiment(text):
 
 st.title("AI-Powered Trading Simulator")
 
-symbol = st.text_input("Enter Stock Symbol", "AAPL").upper()
-investment = st.number_input("Investment Amount ($)", min_value=100, value=1000)
+symbol = st.text_input("Stock Symbol", "AAPL").upper()
+investment = st.number_input("Investment Amount ($)", 100, 10000, 1000)
 
 if st.button("Analyze Stock"):
     st.info("Fetching stock data...")
@@ -54,30 +59,30 @@ if st.button("Analyze Stock"):
     data = fetch_stock_data(symbol)
 
     if data is None:
-        st.error("Failed to fetch stock data. Try again later.")
+        st.error("Could not fetch stock data.")
     else:
         st.success("Stock data loaded")
         st.line_chart(data["Close"])
 
-        news = [
-            f"{symbol} stock hits new quarterly high",
-            f"Regulatory concerns affect {symbol}",
-            f"Analysts optimistic about {symbol} growth"
+        news_samples = [
+            f"{symbol} reports strong quarterly growth",
+            f"{symbol} faces regulatory risk",
+            f"Analysts remain optimistic about {symbol}"
         ]
 
-        st.subheader("News Sentiment Analysis")
-
         sentiments = []
-        for n in news:
-            sentiment = simple_sentiment(n)
+
+        st.subheader("News Analysis")
+        for news in news_samples:
+            sentiment = simple_sentiment(news)
             sentiments.append(sentiment)
-            st.write(f"📰 {n} → **{sentiment}**")
+            st.write(f"📰 {news} → **{sentiment}**")
 
         st.subheader("Strategy Recommendation")
 
         if sentiments.count("Positive") > sentiments.count("Negative"):
-            st.success(f"Recommendation: BUY {symbol}")
+            st.success(f"BUY signal for {symbol}")
         elif sentiments.count("Negative") > sentiments.count("Positive"):
-            st.error(f"Recommendation: SELL {symbol}")
+            st.error(f"SELL signal for {symbol}")
         else:
-            st.info("Recommendation: HOLD")
+            st.info("HOLD")
