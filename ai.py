@@ -1,87 +1,92 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import requests
-from groq import Groq
+import time
+from textblob import TextBlob
 
-st.set_page_config(page_title="AI Trading Simulator", layout="wide")
+# -----------------------------
+# Helper functions
+# -----------------------------
 
-st.title("📈 AI-Powered Trading Simulator with News-Driven Strategy Coach")
+def fetch_stock_data(symbol):
+    """
+    Fetch stock data from yfinance safely with rate-limit handling.
+    Returns a DataFrame.
+    """
+    max_attempts = 5
+    wait_seconds = 5
 
-client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+    for attempt in range(max_attempts):
+        try:
+            stock = yf.Ticker(symbol)
+            data = stock.history(period="3mo")
+            if data.empty:
+                raise ValueError("No data found for this symbol.")
+            return data
+        except yf.shared._exceptions.YFRateLimitError:
+            st.warning(f"Rate limited by Yahoo Finance. Waiting {wait_seconds} seconds...")
+            time.sleep(wait_seconds)
+        except Exception as e:
+            st.error(f"Error fetching data: {e}")
+            return None
+    st.error("Failed to fetch stock data after multiple attempts.")
+    return None
 
-# Sidebar controls
+def analyze_sentiment(text):
+    """
+    Simple sentiment analysis using TextBlob
+    Returns 'Positive', 'Negative', or 'Neutral'
+    """
+    blob = TextBlob(text)
+    polarity = blob.sentiment.polarity
+    if polarity > 0.1:
+        return "Positive"
+    elif polarity < -0.1:
+        return "Negative"
+    else:
+        return "Neutral"
+
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+
+st.title("News-Driven Strategy Coach")
+
 st.sidebar.header("Trading Controls")
-symbol = st.sidebar.text_input("Enter Stock Symbol", "AAPL")
-investment = st.sidebar.number_input("Investment Amount ($)", 1000)
+symbol = st.sidebar.text_input("Enter Stock Symbol", "AAPL").upper()
+investment = st.sidebar.number_input("Investment Amount ($)", min_value=100, value=1000, step=100)
 
-# Fetch stock data
-def get_stock_data(symbol):
-    stock = yf.Ticker(symbol)
-    data = stock.history(period="3mo")
-    return data
+if st.sidebar.button("Analyze Stock"):
 
-# Fetch news (Google RSS)
-def get_stock_news(symbol):
-    url = f"https://news.google.com/rss/search?q={symbol}+stock"
-    response = requests.get(url)
-    return response.text[:2000]
+    # Fetch stock data
+    st.info("Fetching stock data...")
+    data = fetch_stock_data(symbol)
+    if data is not None:
+        st.success("Stock data fetched successfully!")
+        st.line_chart(data['Close'])
 
-# Analyze sentiment using Groq
-def analyze_sentiment_with_groq(text):
-    prompt = f"""
-Analyze the sentiment of the following stock news.
-Classify overall sentiment as Positive, Negative, or Neutral.
-Also mention if any risky events (lawsuit, fraud, earnings, downgrade, investigation) appear.
+        # Fake news headlines for demo
+        news_headlines = [
+            f"{symbol} stock hits new 3-month high!",
+            f"{symbol} faces regulatory challenges.",
+            f"Analysts are optimistic about {symbol}'s future growth."
+        ]
 
-News:
-{text}
-"""
+        st.subheader("News Headlines & Sentiment")
+        sentiments = []
+        for news in news_headlines:
+            sentiment = analyze_sentiment(news)
+            sentiments.append(sentiment)
+            st.write(f"**News:** {news} | **Sentiment:** {sentiment}")
 
-    completion = client.chat.completions.create(
-        model="llama3-8b-8192",
-        messages=[{"role": "user", "content": prompt}]
-    )
+        # Simple strategy based on sentiment
+        positive_count = sentiments.count("Positive")
+        negative_count = sentiments.count("Negative")
 
-    return completion.choices[0].message.content
-
-# Main logic
-if st.button("Analyze Stock"):
-    try:
-        data = get_stock_data(symbol)
-
-        st.subheader("📊 Stock Price Trend (3 Months)")
-        st.line_chart(data["Close"])
-
-        news_text = get_stock_news(symbol)
-
-        st.subheader("📰 Raw News Feed")
-        st.write(news_text[:1000])
-
-        sentiment_result = analyze_sentiment_with_groq(news_text)
-
-        st.subheader("🧠 AI News Sentiment & Risk Analysis")
-        st.success(sentiment_result)
-
-        # Simple AI Insight
-        last_close = data["Close"].iloc[-1]
-        first_close = data["Close"].iloc[0]
-
-        if last_close > first_close:
-            trend = "Uptrend 📈"
+        st.subheader("Strategy Recommendation")
+        if positive_count > negative_count:
+            st.success(f"Recommendation: Consider BUYING {symbol} for ${investment}")
+        elif negative_count > positive_count:
+            st.error(f"Recommendation: Consider SELLING {symbol}")
         else:
-            trend = "Downtrend 📉"
-
-        st.subheader("📌 AI Market Insight")
-        st.info(f"Trend: {trend}")
-
-        if "Negative" in sentiment_result:
-            st.error("⚠️ Risk Alert: Negative news sentiment detected. Avoid aggressive buying.")
-        elif "Positive" in sentiment_result:
-            st.success("✅ Bullish Signal: Positive news sentiment detected. Consider buying opportunities.")
-        else:
-            st.warning("⚖️ Neutral Signal: Market direction unclear. Trade cautiously.")
-
-    except Exception as e:
-        st.error("Something went wrong.")
-        st.write(e)
+            st.info("Recommendation: HOLD / No strong signal")
