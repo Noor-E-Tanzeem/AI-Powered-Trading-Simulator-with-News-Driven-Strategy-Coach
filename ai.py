@@ -2,91 +2,82 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import time
-from textblob import TextBlob
 
 # -----------------------------
 # Helper functions
 # -----------------------------
 
+@st.cache_data(ttl=3600)
 def fetch_stock_data(symbol):
-    """
-    Fetch stock data from yfinance safely with rate-limit handling.
-    Returns a DataFrame.
-    """
     max_attempts = 5
-    wait_seconds = 5
-
-    for attempt in range(max_attempts):
+    for _ in range(max_attempts):
         try:
             stock = yf.Ticker(symbol)
             data = stock.history(period="3mo")
             if data.empty:
-                raise ValueError("No data found for this symbol.")
+                return None
             return data
-        except yf.shared._exceptions.YFRateLimitError:
-            st.warning(f"Rate limited by Yahoo Finance. Waiting {wait_seconds} seconds...")
-            time.sleep(wait_seconds)
-        except Exception as e:
-            st.error(f"Error fetching data: {e}")
-            return None
-    st.error("Failed to fetch stock data after multiple attempts.")
+        except:
+            time.sleep(5)
     return None
 
-def analyze_sentiment(text):
-    """
-    Simple sentiment analysis using TextBlob
-    Returns 'Positive', 'Negative', or 'Neutral'
-    """
-    blob = TextBlob(text)
-    polarity = blob.sentiment.polarity
-    if polarity > 0.1:
+
+def simple_sentiment(text):
+    positive_words = ["gain", "growth", "profit", "high", "up", "strong", "optimistic"]
+    negative_words = ["loss", "drop", "decline", "risk", "down", "weak", "regulatory"]
+
+    text = text.lower()
+
+    pos = sum(word in text for word in positive_words)
+    neg = sum(word in text for word in negative_words)
+
+    if pos > neg:
         return "Positive"
-    elif polarity < -0.1:
+    elif neg > pos:
         return "Negative"
     else:
         return "Neutral"
+
 
 # -----------------------------
 # Streamlit UI
 # -----------------------------
 
-st.title("News-Driven Strategy Coach")
+st.title("AI-Powered Trading Simulator")
 
-st.sidebar.header("Trading Controls")
-symbol = st.sidebar.text_input("Enter Stock Symbol", "AAPL").upper()
-investment = st.sidebar.number_input("Investment Amount ($)", min_value=100, value=1000, step=100)
+symbol = st.text_input("Enter Stock Symbol", "AAPL").upper()
+investment = st.number_input("Investment Amount ($)", min_value=100, value=1000)
 
-if st.sidebar.button("Analyze Stock"):
-
-    # Fetch stock data
+if st.button("Analyze Stock"):
     st.info("Fetching stock data...")
-    data = fetch_stock_data(symbol)
-    if data is not None:
-        st.success("Stock data fetched successfully!")
-        st.line_chart(data['Close'])
 
-        # Fake news headlines for demo
-        news_headlines = [
-            f"{symbol} stock hits new 3-month high!",
-            f"{symbol} faces regulatory challenges.",
-            f"Analysts are optimistic about {symbol}'s future growth."
+    data = fetch_stock_data(symbol)
+
+    if data is None:
+        st.error("Failed to fetch stock data. Try again later.")
+    else:
+        st.success("Stock data loaded")
+        st.line_chart(data["Close"])
+
+        news = [
+            f"{symbol} stock hits new quarterly high",
+            f"Regulatory concerns affect {symbol}",
+            f"Analysts optimistic about {symbol} growth"
         ]
 
-        st.subheader("News Headlines & Sentiment")
-        sentiments = []
-        for news in news_headlines:
-            sentiment = analyze_sentiment(news)
-            sentiments.append(sentiment)
-            st.write(f"**News:** {news} | **Sentiment:** {sentiment}")
+        st.subheader("News Sentiment Analysis")
 
-        # Simple strategy based on sentiment
-        positive_count = sentiments.count("Positive")
-        negative_count = sentiments.count("Negative")
+        sentiments = []
+        for n in news:
+            sentiment = simple_sentiment(n)
+            sentiments.append(sentiment)
+            st.write(f"📰 {n} → **{sentiment}**")
 
         st.subheader("Strategy Recommendation")
-        if positive_count > negative_count:
-            st.success(f"Recommendation: Consider BUYING {symbol} for ${investment}")
-        elif negative_count > positive_count:
-            st.error(f"Recommendation: Consider SELLING {symbol}")
+
+        if sentiments.count("Positive") > sentiments.count("Negative"):
+            st.success(f"Recommendation: BUY {symbol}")
+        elif sentiments.count("Negative") > sentiments.count("Positive"):
+            st.error(f"Recommendation: SELL {symbol}")
         else:
-            st.info("Recommendation: HOLD / No strong signal")
+            st.info("Recommendation: HOLD")
