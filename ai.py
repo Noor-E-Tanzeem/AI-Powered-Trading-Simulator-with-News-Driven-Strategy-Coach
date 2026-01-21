@@ -1,78 +1,87 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-from transformers import pipeline
 import requests
+from groq import Groq
 
 st.set_page_config(page_title="AI Trading Simulator", layout="wide")
 
 st.title("📈 AI-Powered Trading Simulator with News-Driven Strategy Coach")
 
-# Load sentiment model
-@st.cache_resource
-def load_model():
-    return pipeline("sentiment-analysis")
+client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-sentiment_model = load_model()
-
-# Sidebar
+# Sidebar controls
 st.sidebar.header("Trading Controls")
-
-stock_symbol = st.sidebar.text_input("Enter Stock Symbol", "AAPL")
-investment_amount = st.sidebar.number_input("Investment Amount ($)", 1000)
+symbol = st.sidebar.text_input("Enter Stock Symbol", "AAPL")
+investment = st.sidebar.number_input("Investment Amount ($)", 1000)
 
 # Fetch stock data
 def get_stock_data(symbol):
     stock = yf.Ticker(symbol)
-    hist = stock.history(period="3mo")
-    return hist
+    data = stock.history(period="3mo")
+    return data
 
-# Fetch news
+# Fetch news (Google RSS)
 def get_stock_news(symbol):
-    API_KEY = "YOUR_NEWS_API_KEY"
-    url = f"https://newsapi.org/v2/everything?q={symbol}&apiKey={API_KEY}"
+    url = f"https://news.google.com/rss/search?q={symbol}+stock"
     response = requests.get(url)
-    data = response.json()
-    return data.get("articles", [])[:5]
+    return response.text[:2000]
 
-# Analyze sentiment
-def analyze_sentiment(news_list):
-    sentiments = []
-    for article in news_list:
-        result = sentiment_model(article["title"])[0]
-        sentiments.append(result)
-    return sentiments
+# Analyze sentiment using Groq
+def analyze_sentiment_with_groq(text):
+    prompt = f"""
+Analyze the sentiment of the following stock news.
+Classify overall sentiment as Positive, Negative, or Neutral.
+Also mention if any risky events (lawsuit, fraud, earnings, downgrade, investigation) appear.
+
+News:
+{text}
+"""
+
+    completion = client.chat.completions.create(
+        model="llama3-8b-8192",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    return completion.choices[0].message.content
 
 # Main logic
 if st.button("Analyze Stock"):
     try:
-        data = get_stock_data(stock_symbol)
-        st.subheader("📊 Recent Stock Prices")
+        data = get_stock_data(symbol)
+
+        st.subheader("📊 Stock Price Trend (3 Months)")
         st.line_chart(data["Close"])
 
-        news = get_stock_news(stock_symbol)
-        st.subheader("📰 Latest News")
-        for article in news:
-            st.write("-", article["title"])
+        news_text = get_stock_news(symbol)
 
-        sentiments = analyze_sentiment(news)
-        st.subheader("🧠 News Sentiment Analysis")
-        for s in sentiments:
-            st.write(s)
+        st.subheader("📰 Raw News Feed")
+        st.write(news_text[:1000])
 
-        positive = sum(1 for s in sentiments if s["label"] == "POSITIVE")
-        negative = sum(1 for s in sentiments if s["label"] == "NEGATIVE")
+        sentiment_result = analyze_sentiment_with_groq(news_text)
 
-        if positive > negative:
-            insight = "📈 Positive sentiment detected. Market mood looks bullish."
-        elif negative > positive:
-            insight = "📉 Negative sentiment detected. Market mood looks bearish."
+        st.subheader("🧠 AI News Sentiment & Risk Analysis")
+        st.success(sentiment_result)
+
+        # Simple AI Insight
+        last_close = data["Close"].iloc[-1]
+        first_close = data["Close"].iloc[0]
+
+        if last_close > first_close:
+            trend = "Uptrend 📈"
         else:
-            insight = "⚖️ Mixed sentiment. Market direction unclear."
+            trend = "Downtrend 📉"
 
         st.subheader("📌 AI Market Insight")
-        st.success(insight)
+        st.info(f"Trend: {trend}")
+
+        if "Negative" in sentiment_result:
+            st.error("⚠️ Risk Alert: Negative news sentiment detected. Avoid aggressive buying.")
+        elif "Positive" in sentiment_result:
+            st.success("✅ Bullish Signal: Positive news sentiment detected. Consider buying opportunities.")
+        else:
+            st.warning("⚖️ Neutral Signal: Market direction unclear. Trade cautiously.")
 
     except Exception as e:
-        st.error("Error fetching data or analyzing sentiment.")
+        st.error("Something went wrong.")
         st.write(e)
