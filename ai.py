@@ -6,145 +6,131 @@ from groq import Groq
 import finnhub
 import numpy as np
 from alpha_vantage.timeseries import TimeSeries
+from datetime import datetime, timedelta
 
-# --- THEME & CONFIG ---
-st.set_page_config(page_title="AlphaNexus AI Terminal", layout="wide", initial_sidebar_state="expanded")
+# --- 1. SET PAGE CONFIG ---
+st.set_page_config(page_title="AlphaNexus: Institutional Intelligence", layout="wide")
 
-# --- API INITIALIZATION ---
-# Using secrets for security
-try:
-    groq_client = Groq(api_key=st.secrets["GROQ_API_KEY"])
-    finnhub_client = finnhub.Client(api_key=st.secrets["FINNHUB_API_KEY"])
-    av_key = st.secrets["ALPHAVANTAGE_API_KEY"]
-except Exception as e:
-    st.error("API Keys missing in Streamlit Secrets!")
+# --- 2. ROBUST API INITIALIZATION ---
+# This prevents the 'NameError' by checking for keys first
+def init_clients():
+    try:
+        g_client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+        f_client = finnhub.Client(api_key=st.secrets["FINNHUB_API_KEY"])
+        av_key = st.secrets["ALPHAVANTAGE_API_KEY"]
+        return g_client, f_client, av_key
+    except Exception as e:
+        st.error(f"⚠️ API Key Error: {e}. Check your Streamlit Secrets!")
+        st.stop()
 
-# --- ENGINE FUNCTIONS ---
+groq_client, finnhub_client, ALPHAVANTAGE_KEY = init_clients()
 
-def get_council_debate(ticker, news, price):
-    """The Rare 'Multi-Agent' Debate Logic"""
-    prompt = f"""
-    Act as a Council of 3 Elite Hedge Fund Traders analyzing {ticker} at ${price}.
-    News Headlines: {news}
-    
-    Provide a debate between:
-    1. THE AGGRESSIVE BULL: Why this is a 'Load the Boat' moment.
-    2. THE CYNICAL BEAR: Why this is a 'Bull Trap'.
-    3. THE QUANT: What the statistical probability of a reversal is based on the news.
-    
-    Keep it high-stakes and professional.
-    """
-    completion = groq_client.chat.completions.create(
+# --- 3. THE "RARE" FEATURE ENGINES ---
+
+def get_council_debate(ticker, news):
+    """Multi-Agent Strategy Debate"""
+    prompt = f"Act as a Council of 3 Traders. Analyze {ticker} news: {news}. Debate the Bull Case, Bear Case, and Institutional 'Whale' perspective."
+    chat = groq_client.chat.completions.create(
         model="llama3-70b-8192",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7
     )
-    return completion.choices[0].message.content
+    return chat.choices[0].message.content
 
-def get_whale_activity(df):
-    """Institutional Volume Analysis (The Whale Tracker)"""
-    # Calculate Volume Moving Average
+def detect_whales(df):
+    """Institutional Volume Spike Detector"""
     df['Vol_Avg'] = df['Volume'].rolling(window=20).mean()
-    # A 'Whale' move is volume > 250% of average
-    df['Whale_Signal'] = np.where(df['Volume'] > (df['Vol_Avg'] * 2.5), df['Close'], np.nan)
+    # If volume is 3x higher than average, it's a 'Whale' movement
+    df['Whale_Signal'] = np.where(df['Volume'] > (df['Vol_Avg'] * 3), df['Close'], np.nan)
     return df
 
-def run_pro_backtest(ticker):
-    """Vectorized Backtester with 5-Year Data"""
-    ts = TimeSeries(key=av_key, output_format='pandas')
-    data, meta_data = ts.get_daily_adjusted(symbol=ticker, outputsize='full')
-    df = data.iloc[:1260] # Last 5 years
-    df = df.rename(columns={'5. adjusted close': 'Close', '6. volume': 'Volume'})
-    df = df.sort_index()
-
-    # Strategy: EMA 20/50 Cross
-    df['EMA20'] = ta.ema(df['Close'], length=20)
-    df['EMA50'] = ta.ema(df['Close'], length=50)
-    df['Signal'] = np.where(df['EMA20'] > df['EMA50'], 1, 0)
+def backtest_engine(ticker):
+    """5-Year Historical Performance Engine"""
+    ts = TimeSeries(key=ALPHAVANTAGE_KEY, output_format='pandas')
+    # Fetch 5 years (approx 1260 trading days)
+    data, _ = ts.get_daily_adjusted(symbol=ticker, outputsize='full')
+    df = data.iloc[:1260].rename(columns={'5. adjusted close': 'Close', '6. volume': 'Volume'}).sort_index()
     
-    # Calculate Performance
+    # Strategy: EMA 20/50 Cross + RSI 14
+    df['EMA_F'] = ta.ema(df['Close'], length=20)
+    df['EMA_S'] = ta.ema(df['Close'], length=50)
+    df['Signal'] = np.where(df['EMA_F'] > df['EMA_S'], 1, 0)
+    
+    # Returns
     df['Returns'] = df['Close'].pct_change()
-    df['Strategy_Returns'] = df['Returns'] * df['Signal'].shift(1)
-    df['Cumulative_Market'] = (1 + df['Returns']).cumprod()
-    df['Cumulative_Strategy'] = (1 + df['Strategy_Returns']).cumprod()
-    
+    df['Strategy'] = df['Returns'] * df['Signal'].shift(1)
+    df['Market_Cum'] = (1 + df['Returns']).cumprod()
+    df['Strategy_Cum'] = (1 + df['Strategy']).cumprod()
     return df
 
-# --- UI LAYOUT ---
-st.title("🏛️ ALPHANEXUS: AI GLOBAL TERMINAL")
-st.markdown("---")
+# --- 4. THE UI LAYOUT ---
+st.title("🏛️ ALPHANEXUS: ELITE STRATEGY TERMINAL")
+st.caption(f"System Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Data Stream: STABLE")
 
-# Sidebar
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/2534/2534407.png", width=100)
-    st.header("Terminal Access")
-    ticker = st.text_input("Asset Ticker", value="NVDA").upper()
-    st.divider()
-    st.info("Status: API Streams Active ✅")
+ticker = st.sidebar.text_input("ENTER TICKER SYMBOL", value="NVDA").upper()
+st.sidebar.divider()
+st.sidebar.markdown("### 🛠️ Terminal Tools")
+show_whales = st.sidebar.checkbox("Show Whale Activity", value=True)
 
-# Main Tabs
-tab1, tab2, tab3 = st.tabs(["🚀 Live Command", "🧠 Strategy Council", "🧪 Backtest Engine"])
+tab1, tab2, tab3 = st.tabs(["📊 LIVE COMMAND", "🧠 AI COUNCIL", "🧪 BACKTEST LAB"])
 
 # --- TAB 1: LIVE COMMAND ---
 with tab1:
-    # Fetching Live Price via Finnhub (Fast & Stable)
     quote = finnhub_client.quote(ticker)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Current Price", f"${quote['c']}")
-    col2.metric("Daily High", f"${quote['h']}")
-    col3.metric("Change", f"{quote['dp']}%")
-    col4.metric("Sentiment Score", "74/100") # Hardcoded for UI feel
+    if quote:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("CURRENT PRICE", f"${quote['c']}")
+        c2.metric("24H CHANGE", f"{quote['dp']}%", f"{quote['d']}")
+        c3.metric("OPEN", f"${quote['o']}")
+        c4.metric("VOLATILITY", "HIGH" if abs(quote['dp']) > 2 else "LOW")
 
-    # Plotting Data
-    ts = TimeSeries(key=av_key, output_format='pandas')
-    df_recent, _ = ts.get_intraday(symbol=ticker, interval='60min', outputsize='compact')
-    df_recent = df_recent.rename(columns={'4. close': 'Close', '5. volume': 'Volume'})
-    df_recent = get_whale_activity(df_recent)
+        # Live-ish Chart (Last 100 periods)
+        ts = TimeSeries(key=ALPHAVANTAGE_KEY, output_format='pandas')
+        df_live, _ = ts.get_intraday(symbol=ticker, interval='60min', outputsize='compact')
+        df_live = df_live.rename(columns={'4. close': 'Close', '5. volume': 'Volume'})
+        df_live = detect_whales(df_live)
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df_recent.index, y=df_recent['Close'], name="Price", line=dict(color="#00ffcc")))
-    # Plot Whale Activity Dots
-    fig.add_trace(go.Scatter(x=df_recent.index, y=df_recent['Whale_Signal'], mode='markers', 
-                             name="Whale Buy/Sell", marker=dict(size=12, color="orange", symbol="diamond")))
-    
-    fig.update_layout(template="plotly_dark", height=500, title=f"{ticker} Institutional Activity Map")
-    st.plotly_chart(fig, use_container_width=True)
-    st.caption("Orange Diamonds represent Institutional 'Whale' Volume spikes.")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df_live.index, y=df_live['Close'], name="Price", line=dict(color="#00ffcc", width=2)))
+        
+        if show_whales:
+            fig.add_trace(go.Scatter(x=df_live.index, y=df_live['Whale_Signal'], mode='markers', 
+                                     name="Institutional Whale", marker=dict(size=12, color="orange", symbol="diamond")))
 
-# --- TAB 2: STRATEGY COUNCIL ---
+        fig.update_layout(template="plotly_dark", height=500, margin=dict(l=0, r=0, t=30, b=0))
+        st.plotly_chart(fig, use_container_width=True)
+
+# --- TAB 2: AI COUNCIL ---
 with tab2:
-    st.header("The Council of Agents")
-    news = finnhub_client.company_news(ticker, _from="2024-01-01", to="2024-12-31")[:5]
-    news_titles = " | ".join([n['headline'] for n in news])
+    st.header("The Strategy Council (Multi-Agent Debate)")
+    news = finnhub_client.company_news(ticker, _from=(datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'), to=datetime.now().strftime('%Y-%m-%d'))[:5]
     
-    if st.button("Summon The Council"):
-        with st.spinner("Analyzing Global Sentiment..."):
-            debate = get_council_debate(ticker, news_titles, quote['c'])
-            st.markdown(debate)
+    if st.button("RUN COUNCIL ANALYSIS"):
+        headlines = " | ".join([n['headline'] for n in news])
+        with st.spinner("Council is deliberating..."):
+            debate_result = get_council_debate(ticker, headlines)
+            st.markdown(f"### Live Debate Result\n{debate_result}")
     
-    with st.expander("Raw News Feed"):
+    with st.expander("Latest Intelligence Feed"):
         for n in news:
-            st.write(f"📌 {n['headline']}")
+            st.write(f"📅 {datetime.fromtimestamp(n['datetime']).strftime('%Y-%m-%d')} - **{n['headline']}**")
 
-# --- TAB 3: BACKTEST ENGINE ---
+# --- TAB 3: BACKTEST LAB ---
 with tab3:
-    st.header("5-Year Stress Test")
-    if st.button("Run Historical Simulation"):
-        with st.spinner("Calculating 1,200+ days of alpha..."):
-            results = run_pro_backtest(ticker)
+    st.header("5-Year Historical Stress Test")
+    if st.button("RUN 5-YEAR BACKTEST"):
+        with st.spinner("Processing 1,260 days of market data..."):
+            bt_results = backtest_engine(ticker)
             
-            # Show Equity Curve
-            fig_backtest = go.Figure()
-            fig_backtest.add_trace(go.Scatter(x=results.index, y=results['Cumulative_Strategy'], name="AI Strategy", line=dict(color="#00ffcc")))
-            fig_backtest.add_trace(go.Scatter(x=results.index, y=results['Cumulative_Market'], name="Market (S&P)", line=dict(color="gray")))
-            fig_backtest.update_layout(template="plotly_dark", title="Wealth Growth: Strategy vs Market")
-            st.plotly_chart(fig_backtest, use_container_width=True)
+            fig_bt = go.Figure()
+            fig_bt.add_trace(go.Scatter(x=bt_results.index, y=bt_results['Strategy_Cum'], name="AI Strategy", line=dict(color="#00ffcc")))
+            fig_bt.add_trace(go.Scatter(x=bt_results.index, y=bt_results['Market_Cum'], name="Market Bench", line=dict(color="gray", dash='dash')))
+            fig_bt.update_layout(template="plotly_dark", title="Wealth Growth: Strategy vs Market")
+            st.plotly_chart(fig_bt, use_container_width=True)
             
-            m1, m2 = st.columns(2)
-            total_ret = (results['Cumulative_Strategy'].iloc[-1] - 1) * 100
-            m1.metric("Total Strategy Return", f"{total_ret:.2f}%")
-            m2.metric("Market Benchmark", f"{(results['Cumulative_Market'].iloc[-1]-1)*100:.2f}%")
+            # Key Stats
+            total_return = (bt_results['Strategy_Cum'].iloc[-1] - 1) * 100
+            st.success(f"Strategy Total Return: {total_return:.2f}%")
 
-st.markdown("---")
-st.caption("AlphaNexus Terminal v1.0 | Developed for High-Frequency Analysis")
+st.divider()
+st.caption("AlphaNexus Terminal | Institutional Grade AI Simulator | © 2026")
