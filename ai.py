@@ -44,7 +44,7 @@ def get_intraday_data(ticker):
         return None
 
 # --- 4. THE UI LAYOUT ---
-st.title("🏛️ ALPHANEXUS: INSTITUTIONAL TERMINAL")
+st.title("🏛️ Tanzeem's ALPHANEXUS: INSTITUTIONAL TERMINAL")
 
 with st.sidebar:
     ticker = st.text_input("ENTER TICKER", value="AAPL").upper()
