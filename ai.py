@@ -2,107 +2,143 @@ import streamlit as st
 import pandas as pd
 import pandas_ta as ta
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from groq import Groq
 import finnhub
 import numpy as np
 import requests
 from datetime import datetime, timedelta
 
-# --- 1. SYSTEM CONFIG ---
-st.set_page_config(page_title="AlphaNexus Pro", layout="wide")
+# --- 1. SYSTEM CONFIG & ELITE STYLING ---
+st.set_page_config(page_title="Tanzeem's AlphaNexus: Institutional Quant", layout="wide")
 
-# Robust Secret Loading
+# Custom CSS for Institutional "Glow" and Dark Theme Branding
+st.markdown("""
+    <style>
+    .main { background-color: #0e1117; }
+    .stHeading h1 { 
+        color: #00ffcc; 
+        text-shadow: 0 0 10px #00ffcc, 0 0 20px #00ffcc;
+        font-family: 'Courier New', Courier, monospace;
+    }
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #1a1c24;
+        border-radius: 5px 5px 0px 0px;
+        padding: 10px 20px;
+        color: white;
+    }
+    .stTabs [aria-selected="true"] { background-color: #00ffcc !important; color: black !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# Safe Secret Loading
 def get_secret(key):
-    try:
-        return st.secrets[key]
-    except:
-        st.error(f"Missing {key} in Streamlit Secrets! Use KEY = 'VALUE' format.")
-        st.stop()
+    try: return st.secrets[key]
+    except: st.error(f"Missing {key}"); st.stop()
 
 GROQ_API_KEY = get_secret("GROQ_API_KEY")
 FINNHUB_API_KEY = get_secret("FINNHUB_API_KEY")
 AV_API_KEY = get_secret("ALPHAVANTAGE_API_KEY")
 
-# --- 2. STABLE DATA ENGINE (Direct Request Method) ---
+# --- 2. MULTI-ASSET DATA ENGINE ---
 @st.cache_data(ttl=600)
-def fetch_stock_data(ticker):
-    """Fetches historical daily data for charting and backtesting"""
-    url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&apikey={AV_API_KEY}'
+def fetch_data(ticker, function='TIME_SERIES_DAILY'):
+    url = f'https://www.alphavantage.co/query?function={function}&symbol={ticker}&apikey={AV_API_KEY}'
     try:
         r = requests.get(url)
         data = r.json()
-        if "Time Series (Daily)" in data:
-            df = pd.DataFrame.from_dict(data["Time Series (Daily)"], orient='index')
-            df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        key = "Time Series (Daily)" if "DAILY" in function else "Time Series (Digital Currency Daily)"
+        if key in data:
+            df = pd.DataFrame.from_dict(data[key], orient='index')
+            df.columns = ['Open', 'High', 'Low', 'Close', 'Volume'] if "DAILY" in function else ['Open', 'High', 'Low', 'Close', 'Vol', 'MarketCap']
             df.index = pd.to_datetime(df.index)
-            df = df.astype(float).sort_index()
-            return df
-        elif "Note" in data or "Information" in data:
-            return "LIMIT"
-        return None
-    except:
-        return None
+            return df.astype(float).sort_index()
+        return "LIMIT"
+    except: return None
 
-# --- 3. UI LAYOUT ---
-st.title("🏛️ ALPHANEXUS: INSTITUTIONAL TERMINAL")
-ticker = st.sidebar.text_input("SYMBOL", value="AAPL").upper()
-show_whales = st.sidebar.toggle("Whale Activity Overlay", value=True)
+# --- 3. SIDEBAR COMMANDER ---
+with st.sidebar:
+    st.markdown("# 🏛️ ALPHANEXUS")
+    st.markdown("### QUANT TERMINAL v3.1")
+    st.divider()
+    ticker = st.text_input("PRIMARY TICKER", value="TSLA").upper()
+    st.divider()
+    st.subheader("🎲 Stress Test Params")
+    sim_days = st.slider("Horizon", 30, 250, 90)
+    num_paths = st.slider("Paths", 10, 100, 50)
+    st.divider()
+    st.caption("Developed by Tanzeem | © 2026")
 
-# THE THREE TABS
-tab1, tab2, tab3 = st.tabs(["📊 COMMAND CENTER", "🧠 AI COUNCIL", "🧪 BACKTEST LAB"])
+# --- 4. MAIN TERMINAL UI ---
+st.title("Tanzeem's AlphaNexus: Institutional Quant")
 
-# TAB 1: COMMAND CENTER
-with tab1:
-    df = fetch_stock_data(ticker)
+tabs = st.tabs(["🌐 GLOBAL MACRO", "📊 ASSET ANALYSIS", "🧠 AI COUNCIL", "🧪 STRATEGY LAB"])
+
+# --- TAB 1: GLOBAL MACRO (The 'Rare' Feature) ---
+with tabs[0]:
+    st.header("Global Market Health Dashboard")
+    col1, col2, col3 = st.columns(3)
+    
+    # We use common indices to show market health
+    with st.spinner("Syncing Global Markets..."):
+        btc = fetch_data("BTC", "DIGITAL_CURRENCY_DAILY")
+        gold = fetch_data("GLD") # Gold ETF
+        spy = fetch_data("SPY")  # S&P 500
+        
+        if isinstance(btc, pd.DataFrame):
+            col1.metric("BITCOIN (24H)", f"${btc['Close'].iloc[-1]:,.2f}")
+        if isinstance(gold, pd.DataFrame):
+            col2.metric("GOLD (GLD)", f"${gold['Close'].iloc[-1]:,.2f}")
+        if isinstance(spy, pd.DataFrame):
+            col3.metric("S&P 500 (SPY)", f"${spy['Close'].iloc[-1]:,.2f}")
+            
+    st.info("Market Sentiment: Institutional flows are currently monitoring high-volatility zones in the assets above.")
+
+# --- TAB 2: ASSET ANALYSIS ---
+with tabs[1]:
+    df = fetch_data(ticker)
     if isinstance(df, pd.DataFrame):
-        fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Market")])
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
+        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
         
-        if show_whales:
-            df['Vol_Avg'] = df['Volume'].rolling(window=20).mean()
-            df['Whale'] = np.where(df['Volume'] > (df['Vol_Avg'] * 3), df['Close'], np.nan)
-            fig.add_trace(go.Scatter(x=df.index, y=df['Whale'], mode='markers', name="Whale Spike", marker=dict(size=12, color="orange", symbol="diamond")))
-            
-        fig.update_layout(template="plotly_dark", height=500, title=f"{ticker} Market Feed")
+        # Whale Detection logic
+        df['Vol_Avg'] = df['Volume'].rolling(20).mean()
+        df['Whale'] = np.where(df['Volume'] > (df['Vol_Avg'] * 2.5), 'orange', '#00ffcc')
+        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=df['Whale'], name="Volume"), row=2, col=1)
+        
+        fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
-    elif df == "LIMIT":
-        st.error("🚨 ALPHA VANTAGE LIMIT REACHED (25 Requests/Day).")
+    else:
+        st.error("Data Limit Reached.")
 
-# TAB 2: AI COUNCIL
-with tab2:
-    st.header("The Strategy Council")
-    if st.button("SUMMON COUNCIL"):
+# --- TAB 3: AI COUNCIL ---
+with tabs[2]:
+    if st.button("RUN COUNCIL DEBATE"):
         client = Groq(api_key=GROQ_API_KEY)
-        finnhub_client = finnhub.Client(api_key=FINNHUB_API_KEY)
-        news = finnhub_client.company_news(ticker, _from=(datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'), to=datetime.now().strftime('%Y-%m-%d'))[:5]
-        headlines = " | ".join([n['headline'] for n in news])
-        
-        with st.spinner("Council is deliberating..."):
-            chat = client.chat.completions.create(
+        with st.spinner("AI Agents Deliberating..."):
+            res = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": f"Analyze {ticker} based on news: {headlines}. Debate as a Bull and a Bear."}]
+                messages=[{"role": "user", "content": f"Analyze {ticker} from a Macro and Micro perspective."}]
             )
-            st.markdown(chat.choices[0].message.content)
+            st.markdown(res.choices[0].message.content)
 
-# TAB 3: BACKTEST LAB (The Missing Tab)
-with tab3:
-    st.header("5-Year Historical Stress Test")
-    if st.button("RUN SIMULATION"):
-        df_bt = fetch_stock_data(ticker)
-        if isinstance(df_bt, pd.DataFrame):
-            # Strategy: EMA 20/50 Cross
-            df_bt['EMA20'] = ta.ema(df_bt['Close'], length=20)
-            df_bt['EMA50'] = ta.ema(df_bt['Close'], length=50)
-            df_bt['Signal'] = np.where(df_bt['EMA20'] > df_bt['EMA50'], 1, 0)
-            df_bt['Returns'] = (df_bt['Close'].pct_change() * df_bt['Signal'].shift(1) + 1).cumprod()
+# --- TAB 4: STRATEGY LAB (Monte Carlo) ---
+with tabs[3]:
+    st.header("Monte Carlo Probability Projection")
+    if isinstance(df, pd.DataFrame):
+        returns = df['Close'].pct_change().dropna()
+        last_price = df['Close'].iloc[-1]
+        
+        sim_results = []
+        for _ in range(num_paths):
+            prices = [last_price]
+            for _ in range(sim_days):
+                prices.append(prices[-1] * (1 + np.random.normal(returns.mean(), returns.std())))
+            sim_results.append(prices)
             
-            fig_bt = go.Figure()
-            fig_bt.add_trace(go.Scatter(x=df_bt.index, y=df_bt['Returns'], name="AI Strategy Growth", line=dict(color="#00ffcc")))
-            fig_bt.update_layout(template="plotly_dark", title="Wealth Cumulative Growth")
-            st.plotly_chart(fig_bt, use_container_width=True)
-            
-            total_growth = (df_bt['Returns'].iloc[-1] - 1) * 100
-            st.success(f"Strategy Simulation Complete: {total_growth:.2f}% Total Growth")
-        else:
-            st.error("Could not run backtest. Check API limits.")
-
-st.sidebar.caption("v2.6 Stable Build | © 2026")
+        fig_sim = go.Figure()
+        for path in sim_results:
+            fig_sim.add_trace(go.Scatter(y=path, mode='lines', line=dict(width=1), opacity=0.3, showlegend=False))
+        fig_sim.update_layout(template="plotly_dark", title=f"Future Projection ({num_paths} Paths)")
+        st.plotly_chart(fig_sim, use_container_width=True)
