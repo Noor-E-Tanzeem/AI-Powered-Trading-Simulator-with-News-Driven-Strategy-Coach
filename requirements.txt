@@ -1,5 +1,8 @@
 streamlit
-yfinance
 pandas
+pandas_ta
+plotly
+groq
+finnhub-python
+alpha_vantage
 numpy
-matplotlib
