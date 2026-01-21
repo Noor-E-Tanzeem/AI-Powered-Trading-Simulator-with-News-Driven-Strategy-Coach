@@ -2,156 +2,101 @@ import streamlit as st
 import pandas as pd
 import pandas_ta as ta
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from groq import Groq
-import finnhub
 import numpy as np
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# --- 1. ELITE UI CONFIG & NEON BRANDING ---
-st.set_page_config(page_title="Tanzeem's AlphaNexus", layout="wide", page_icon="🏛️")
+# --- 1. ELITE UI CONFIG ---
+st.set_page_config(page_title="AlphaNexus Elite", layout="wide")
 
 # Custom CSS for the "Institutional Glow"
 st.markdown("""
     <style>
     .main { background-color: #05070a; }
-    .stHeading h1 { 
-        color: #00ffcc; 
-        text-shadow: 0 0 15px #00ffcc;
-        font-family: 'Orbitron', sans-serif;
-        letter-spacing: 2px;
-        text-align: center;
-    }
-    div[data-testid="stMetricValue"] { color: #00ffcc; font-size: 1.8rem; }
-    .stTabs [data-baseweb="tab-list"] { background-color: #0e1117; border-radius: 10px; padding: 5px; }
-    .stTabs [data-baseweb="tab"] { color: #808080; font-weight: bold; }
-    .stTabs [aria-selected="true"] { color: #00ffcc !important; border-bottom: 2px solid #00ffcc !important; }
+    .stHeading h1 { color: #00ffcc; text-shadow: 0 0 10px #00ffcc; text-align: center; font-family: 'Courier New', monospace; }
+    div[data-testid="stMetricValue"] { color: #00ffcc; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. THE MULTI-THREAD DATA ENGINE ---
-def get_secret(key):
-    try: return st.secrets[key]
-    except: st.error(f"Missing {key}"); st.stop()
-
-GROQ_API_KEY = get_secret("GROQ_API_KEY")
-FINNHUB_API_KEY = get_secret("FINNHUB_API_KEY")
-AV_API_KEY = get_secret("ALPHAVANTAGE_API_KEY")
-
-@st.cache_data(ttl=600)
-def fetch_alpha_data(ticker, function='TIME_SERIES_DAILY'):
-    """High-reliability fetcher for Stocks and Crypto"""
-    url = f'https://www.alphavantage.co/query?function={function}&symbol={ticker}&apikey={AV_API_KEY}'
+# --- 2. THE SMART FETCH ENGINE (Saves your 25 requests) ---
+# This keeps data in memory for 24 hours so you don't burn your limit!
+@st.cache_data(ttl=86400) 
+def fetch_alpha_smart(ticker, api_key):
+    url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&apikey={api_key}'
     try:
         r = requests.get(url)
         data = r.json()
-        # Handle both Stock and Crypto keys
-        ts_key = next((k for k in data.keys() if "Time Series" in k), None)
-        if ts_key:
-            df = pd.DataFrame.from_dict(data[ts_key], orient='index')
-            # Standardize columns
-            df.columns = [c.split('. ')[-1].title() for c in df.columns]
+        if "Time Series (Daily)" in data:
+            df = pd.DataFrame.from_dict(data["Time Series (Daily)"], orient='index')
+            df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
             df.index = pd.to_datetime(df.index)
             return df.astype(float).sort_index()
-        return "LIMIT" if "Information" in str(data) else None
-    except: return None
+        return data # Returns the error message (like "API limit reached")
+    except:
+        return None
 
-# --- 3. SIDEBAR: THE QUANT COMMANDER ---
-with st.sidebar:
-    st.markdown("<h2 style='color:#00ffcc;'>🏛️ COMMANDER</h2>", unsafe_allow_html=True)
-    ticker = st.text_input("PRIMARY ASSET", value="TSLA").upper()
-    st.divider()
-    st.subheader("🎲 Simulation Matrix")
-    sim_days = st.slider("Forecast Horizon", 30, 250, 90)
-    num_paths = st.slider("Quantum Paths", 10, 100, 50)
-    st.divider()
-    st.caption("AlphaNexus Terminal v3.2 | Built by Tanzeem")
-
-# --- 4. MAIN TERMINAL INTERFACE ---
+# --- 3. MAIN INTERFACE ---
 st.title("Tanzeem's AlphaNexus: Institutional Quant")
 
-tabs = st.tabs(["🌐 GLOBAL MACRO", "📊 PRICE ACTION", "🧠 AI RISK COUNCIL", "🎲 PREDICTIVE LAB"])
+with st.sidebar:
+    st.header("🏛️ COMMANDER")
+    # Use session state so the ticker doesn't reset and trigger a new API call
+    ticker = st.text_input("SYMBOL", value="TSLA").upper()
+    av_key = st.secrets["ALPHAVANTAGE_API_KEY"]
+    groq_key = st.secrets["GROQ_API_KEY"]
+    st.divider()
+    st.caption("AlphaNexus v3.9 | Anti-Throttle Mode")
 
-# --- TAB 1: GLOBAL MACRO DASHBOARD ---
-with tabs[0]:
-    st.subheader("Global Health & Correlation")
-    m_col1, m_col2, m_col3 = st.columns(3)
-    
-    with st.spinner("Accessing Global Feeds..."):
-        # Fetching 'The Big Three'
-        spy_data = fetch_alpha_data("SPY")
-        btc_data = fetch_alpha_data("BTC", "DIGITAL_CURRENCY_DAILY")
-        gold_data = fetch_alpha_data("GLD")
-        
-        if isinstance(spy_data, pd.DataFrame):
-            m_col1.metric("S&P 500 (SPY)", f"${spy_data['Close'].iloc[-1]:,.2f}")
-        if isinstance(btc_data, pd.DataFrame):
-            m_col2.metric("BITCOIN (BTC)", f"${btc_data['Close'].iloc[-1]:,.2f}")
-        if isinstance(gold_data, pd.DataFrame):
-            m_col3.metric("GOLD (GLD)", f"${gold_data['Close'].iloc[-1]:,.2f}")
-    
-    st.markdown("---")
-    st.info("💡 **Institutional Note:** Monitor BTC/SPY correlations. Divergence often signals impending volatility.")
+tab1, tab2, tab3 = st.tabs(["📊 ANALYSIS", "🧠 AI COUNCIL", "🎲 PROJECTION"])
 
-# --- TAB 2: PRICE ACTION & WHALE TRACKER ---
-with tabs[1]:
-    df = fetch_alpha_data(ticker)
-    if isinstance(df, pd.DataFrame):
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
+# --- TAB 1: SMART ANALYSIS ---
+with tab1:
+    data = fetch_alpha_smart(ticker, av_key)
+    
+    if isinstance(data, pd.DataFrame):
+        # Professional Candlestick + Whale Tracker
+        fig = go.Figure(data=[go.Candlestick(x=data.index, open=data['Open'], high=data['High'], low=data['Low'], close=data['Close'], name="Price")])
         
-        # Pro Candlesticks
-        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
+        # Rare Feature: The "Institutional Entry" markers
+        data['MA50'] = data['Close'].rolling(50).mean()
+        whales = data[data['Volume'] > (data['Volume'].rolling(20).mean() * 2.5)]
+        fig.add_trace(go.Scatter(x=whales.index, y=whales['Close'], mode='markers', name="Whale Entry", marker=dict(color='orange', size=10, symbol='diamond')))
         
-        # Whale Detection (Volume Heatmap)
-        df['Vol_Avg'] = df['Volume'].rolling(20).mean()
-        df['Whale'] = np.where(df['Volume'] > (df['Vol_Avg'] * 2.5), 'orange', '#00ffcc')
-        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=df['Whale'], name="Vol/Whale Spikes"), row=2, col=1)
-        
-        fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.error("🚨 API LIMIT REACHED. Please wait for reset.")
+        st.error(f"⚠️ API Status: {data.get('Note', 'Connection Error') if isinstance(data, dict) else 'Check API Key'}")
 
-# --- TAB 3: AI RISK COUNCIL (Multi-Agent Debate) ---
-with tabs[2]:
-    st.header("Strategic Deliberation")
-    if st.button("INITIATE COUNCIL DEBATE"):
-        client = Groq(api_key=GROQ_API_KEY)
-        f_client = finnhub.Client(api_key=FINNHUB_API_KEY)
-        
-        # Fetch news context
-        news = f_client.company_news(ticker, _from=(datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d'), to=datetime.now().strftime('%Y-%m-%d'))[:5]
-        headlines = " | ".join([n['headline'] for n in news])
-        
-        with st.spinner("AI Agents Deliberating..."):
-            res = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": f"You are a hedge fund risk committee. Analyze {ticker} news: {headlines}. Present a 'Bull Case', a 'Bear Case', and a 'Final Quant Verdict'."}]
-            )
-            st.markdown(res.choices[0].message.content)
+# --- TAB 2: AI COUNCIL ---
+with tab2:
+    if st.button("RUN COUNCIL DEBATE"):
+        client = Groq(api_key=groq_key)
+        # We pass only the last 5 days of data to save tokens
+        context = data.tail(5).to_string() if isinstance(data, pd.DataFrame) else "No data"
+        res = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": f"Analyze these stock stats for {ticker}: {context}. Give a Bull/Bear verdict."}]
+        )
+        st.markdown(res.choices[0].message.content)
 
-# --- TAB 4: PREDICTIVE LAB (Monte Carlo Simulation) ---
-with tabs[3]:
-    st.header("Monte Carlo Probability Stress Test")
-    if isinstance(df, pd.DataFrame):
-        returns = df['Close'].pct_change().dropna()
-        last_price = df['Close'].iloc[-1]
+# --- TAB 3: QUANT PROJECTION ---
+with tab3:
+    if isinstance(data, pd.DataFrame):
+        st.header("Monte Carlo Probability paths")
+        returns = data['Close'].pct_change().dropna()
+        last_p = data['Close'].iloc[-1]
         
-        # Simulation Matrix
-        sim_data = np.zeros((sim_days, num_paths))
-        for i in range(num_paths):
-            sim_path = [last_price]
-            for _ in range(sim_days - 1):
-                sim_path.append(sim_path[-1] * (1 + np.random.normal(returns.mean(), returns.std())))
-            sim_data[:, i] = sim_path
+        # Generate 30 paths for 60 days
+        all_paths = []
+        for _ in range(30):
+            p = [last_p]
+            for _ in range(60):
+                p.append(p[-1] * (1 + np.random.normal(returns.mean(), returns.std())))
+            all_paths.append(p)
             
         fig_sim = go.Figure()
-        for i in range(num_paths):
-            fig_sim.add_trace(go.Scatter(y=sim_data[:, i], mode='lines', line=dict(width=1), opacity=0.3, showlegend=False))
-            
-        fig_sim.update_layout(template="plotly_dark", title=f"Future Price Projection: {num_paths} Scenarios", xaxis_title="Days Forward", yaxis_title="Projected Price")
+        for path in all_paths:
+            fig_sim.add_trace(go.Scatter(y=path, mode='lines', line=dict(width=1), opacity=0.3, showlegend=False))
+        fig_sim.update_layout(template="plotly_dark")
         st.plotly_chart(fig_sim, use_container_width=True)
-        
-        avg_end_price = sim_data[-1, :].mean()
-        st.metric("Mean Target Price", f"${avg_end_price:.2f}", delta=f"{((avg_end_price/last_price)-1)*100:.2f}%")
