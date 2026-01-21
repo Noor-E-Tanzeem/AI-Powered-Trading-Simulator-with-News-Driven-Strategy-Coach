@@ -1,5 +1,6 @@
-streamlit
-yfinance
-pandas
-requests
-groq
+streamlit==1.29.0
+yfinance==0.2.27
+pandas==2.1.1
+numpy==1.26.5
+matplotlib==3.8.1
+textblob==0.17.1
